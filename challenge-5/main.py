@@ -33,86 +33,48 @@ class ClaimRequest(BaseModel):
 app = FastAPI(title="Claim API", version="0.1.0")
 
 async def get_specialized_agents() -> list[Agent]:
-    """Get our specialized insurance processing agents using Semantic Kernel."""
-    
-    print("🔧 Get specialized insurance agents...")
-
-    # Create Cosmos DB plugin instances for different agents
-    cosmos_plugin_claims = CosmosDBPlugin()
-    cosmos_plugin_risk = CosmosDBPlugin()
-    
-    
-    # Get environment variables
-    endpoint = os.environ.get("AI_FOUNDRY_PROJECT_ENDPOINT")
-    
-    
-    agents = {}
-    
+    ...
     async with DefaultAzureCredential() as creds:
         client = AzureAIAgent.create_client(credential=creds, endpoint=endpoint)
         print("✅ Connected to AI Foundry endpoint.")
-        
-        # Getting Claim Reviewer Agent with Cosmos DB access
+
+        # Helper to safely ensure tools list
+        async def ensure_tools(definition):
+            if not getattr(definition, "tools", None):
+                definition.tools = []
+            return definition
+
+        # Claim Reviewer Agent
         print("🔍 Getting Claim Reviewer Agent...")
         claim_reviewer_definition = await client.agents.get_agent(agent_id=os.environ.get("CLAIM_REV_AGENT_ID"))
-        
+        claim_reviewer_definition = await ensure_tools(claim_reviewer_definition)
         claim_reviewer_agent = AzureAIAgent(
             client=client,
             definition=claim_reviewer_definition,
             description="Agent that reviews insurance claims and retrieves claim details.",
-            plugins=[cosmos_plugin_claims]  
+            plugins=[cosmos_plugin_claims],
         )
 
-        # Getting Risk Analyzer Agent with Cosmos DB access
+        # Risk Analyzer Agent
         print("⚠️ Getting Risk Analyzer Agent...")
         risk_analyzer_definition = await client.agents.get_agent(agent_id=os.environ.get("RISK_ANALYZER_AGENT_ID"))
-
+        risk_analyzer_definition = await ensure_tools(risk_analyzer_definition)
         risk_analyzer_agent = AzureAIAgent(
             client=client,
             definition=risk_analyzer_definition,
             description="Agent that analyzes the risk associated with the claim.",
-            plugins=[cosmos_plugin_risk]
+            plugins=[cosmos_plugin_risk],
         )
 
+        # Policy Checker Agent
         print("✅ Getting Policy Checker Agent...")
-
         policy_checker_definition = await client.agents.get_agent(agent_id=os.environ.get("POLICY_CHECKER_AGENT_ID"))
-
+        policy_checker_definition = await ensure_tools(policy_checker_definition)
         policy_checker_agent = AzureAIAgent(
-            client=client, 
+            client=client,
             definition=policy_checker_definition,
             description="Agent that checks if the policy covers the claim.",
         )
-
-        approver_agent = ChatCompletionAgent(
-            name="ApproverAgent",
-            description="Final decision maker on insurance claims based on analysis from other agents.",
-            instructions=(
-                """You must analyze and process insurance claims based on the information provided by specialized agents.
-                You will provide a final decision on whether to approve or deny the claim, along with a detailed justification. 
-                Your decision must be based on the specific findings and assessments from the Claim Reviewer, Risk Analyzer, and Policy Checker agents. 
-                You must only approve if the claim is valid, risk is low or medium, and the policy covers the claim.
-                Say 'APPROVED' or 'DENIED' followed by your reasoning.
-                Format your response as a JSON object with 'decision' and 'justification' fields.
-                """ 
-            ),
-            service=AzureChatCompletion(
-                deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
-                api_key=os.getenv("AZURE_OPENAI_KEY"),
-                endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            ),
-        )
-
-        agents = [
-            claim_reviewer_agent, 
-            risk_analyzer_agent,
-            policy_checker_agent, 
-            approver_agent
-        ]
-
-        print("✅ All specialized agents created/loaded successfully!")
-        return agents
-
 async def agent_response_callback(message: ChatMessageContent) -> None:
     print(f"# {message.name}\n{message.content}")
     
